@@ -97,6 +97,14 @@ else:
             output = rescale_intensity(output.astype(np.float32), out_range=(0, 1))
         return output
 
+class DummyInteractive:
+    def __init__(self):
+        self.kwargs = {}
+
+from skimage.measure import label
+class DummyLabelLayer:
+    def __init__(self):
+        self.data = None
 
 class Renderer:
     """
@@ -141,6 +149,9 @@ class Renderer:
         self.y_border_expansion_coefficient = 5
         self.x_border_expansion_coefficient = 5
         self.additional_real_images = additional_real_images
+        self.media_label = DummyLabelLayer()
+        self.cell_label = DummyLabelLayer()
+        self.device_label = DummyLabelLayer()
 
         temp_expanded_scene, temp_expanded_scene_no_cells, temp_expanded_mask = self.generate_PC_OPL(
             scene=simulation.OPL_scenes[-1],
@@ -175,8 +186,20 @@ class Renderer:
         self.error_params = (
         mean_error, media_error, cell_error, device_error, mean_var_error, media_var_error, cell_var_error,
         device_var_error)
+        self.params = DummyInteractive()
 
-    def select_intensity_napari(self, auto = True, classes = 3, cells = "dark"):
+    def select_intensity_napari(self, save_dir = ".", initialized = False, auto = True, classes = 3, cells = "dark"):
+        if initialized:
+            with (open(save_dir + "/intensities.p", "rb")) as openfile:
+                try:
+                    import pickle
+                    intensities = pickle.load(openfile)
+                    self.media_label.data = intensities["media_label"]
+                    self.cell_label.data = intensities["cell_label"]
+                    self.device_label.data = intensities["device_label"]
+                except EOFError:
+                    raise EOFError
+            return
         if auto:
             thresholds = threshold_multiotsu(self.real_resize, classes = classes)
             regions = np.digitize(self.real_resize, bins=thresholds)
@@ -192,16 +215,76 @@ class Renderer:
             thresh_media = np.zeros(self.real_resize.shape).astype(int)
             thresh_cells = np.zeros(self.real_resize.shape).astype(int)
             thresh_device = np.zeros(self.real_resize.shape).astype(int)
+
         viewer = napari.view_image(self.real_resize)
+        #napari.run()
         self.media_label = viewer.add_labels(thresh_media, name="Media")
         self.cell_label = viewer.add_labels(thresh_cells, name="Cell")
         self.device_label = viewer.add_labels(thresh_device, name="Device")
+        import pickle
+        with open(save_dir+"/intensities.p", "wb") as f:
+            pickle.dump({"media_label":self.media_label.data, "cell_label": self.cell_label.data, "device_label": self.device_label.data}, f)
 
+    def select_intensity_MATLAB_access(self, save_dir, initialized, media_label, cell_label, device_label):
+        
+        if initialized:
+            with (open(save_dir + "/intensities.p", "rb")) as openfile:
+                try:
+                    import pickle
+                    intensities = pickle.load(openfile)
+                    self.media_label.data = intensities["media_label"]
+                    self.cell_label.data = intensities["cell_label"]
+                    self.device_label.data = intensities["device_label"]
+                    self.real_media_mean = self.real_resize[np.where(self.media_label.data)].mean()
+                    self.real_cell_mean = self.real_resize[np.where(self.cell_label.data)].mean()
+                    self.real_device_mean = self.real_resize[np.where(self.device_label.data)].mean()
+                    self.real_means = np.array((self.real_media_mean, self.real_cell_mean, self.real_device_mean))
 
+                    self.real_media_var = self.real_resize[np.where(self.media_label.data)].var()
+                    self.real_cell_var = self.real_resize[np.where(self.cell_label.data)].var()
+                    self.real_device_var = self.real_resize[np.where(self.device_label.data)].var()
+                    self.real_vars = np.array((self.real_media_var, self.real_cell_var, self.real_device_var))
 
+                    self.image_params = (
+                    self.real_media_mean, self.real_cell_mean, self.real_device_mean, self.real_means, self.real_media_var,
+                    self.real_cell_var, self.real_device_var, self.real_vars)
+                    print("cell")
+                    print(self.real_cell_mean)
+                    print("device")
+                    print(self.real_device_mean)
+                    print("media")
+                    print(self.real_media_mean)
+                except EOFError:
+                    raise EOFError
+            return
+        self.media_label.data = media_label
+        self.cell_label.data = cell_label
+        self.device_label.data = device_label
+        self.real_media_mean = self.real_resize[np.where(self.media_label.data)].mean()
+        self.real_cell_mean = self.real_resize[np.where(self.cell_label.data)].mean()
+        self.real_device_mean = self.real_resize[np.where(self.device_label.data)].mean()
+        self.real_means = np.array((self.real_media_mean, self.real_cell_mean, self.real_device_mean))
+
+        self.real_media_var = self.real_resize[np.where(self.media_label.data)].var()
+        self.real_cell_var = self.real_resize[np.where(self.cell_label.data)].var()
+        self.real_device_var = self.real_resize[np.where(self.device_label.data)].var()
+        self.real_vars = np.array((self.real_media_var, self.real_cell_var, self.real_device_var))
+
+        self.image_params = (
+        self.real_media_mean, self.real_cell_mean, self.real_device_mean, self.real_means, self.real_media_var,
+        self.real_cell_var, self.real_device_var, self.real_vars)
+        import pickle
+        with open(save_dir+"/intensities.p", "wb") as f:
+            pickle.dump({"media_label":self.media_label.data, "cell_label": self.cell_label.data, "device_label": self.device_label.data}, f)
+
+        min_sigma = self.PSF.min_sigma
+        scene_no= len(self.simulation.OPL_scenes)
+
+        return min_sigma, scene_no
+         
     def generate_test_comparison(self, media_multiplier=75, cell_multiplier=1.7, device_multiplier=29, sigma=8.85,
                                  scene_no=-1, match_fourier=False, match_histogram=True, match_noise=False,
-                                 debug_plot=False, noise_var=0.001, defocus=3.0, halo_top_intensity = 1, halo_bottom_intensity = 1, halo_start = 0, halo_end = 1, random_real_image = None):
+                                 debug_plot=False, MATLAB_access=False, noise_var=0.001, defocus=3.0, halo_top_intensity = 1, halo_bottom_intensity = 1, halo_start = 0, halo_end = 1, random_real_image = None, save_dir="."):
         """
         Takes all the parameters we've defined and calculated, and uses them to finally generate a synthetic image.
 
@@ -252,7 +335,7 @@ class Renderer:
         halo_bottom_intensity : float
             Simulated "halo" caused by the microfluidic device. This sets the ending multiplier of a lienar ramp which is applied down the length of the image. E.g, if ``image`` has shape ``(y, x)``, then this results in ``image = image * np.linspace(halo_lower_int,halo_upper_int, image.shape[0])[:, None]``.
 
-
+        
 
         Returns
         -------
@@ -427,35 +510,62 @@ class Renderer:
             media_var_error.append(perc_diff(simulated_vars[0], real_media_var))
             cell_var_error.append(perc_diff(simulated_vars[1], real_cell_var))
             device_var_error.append(perc_diff(simulated_vars[2], real_device_var))
+        import pickle
+        if MATLAB_access:
+            self.params.kwargs["media_multiplier"] = media_multiplier
+            self.params.kwargs["cell_multiplier"] = cell_multiplier
+            self.params.kwargs["device_multiplier"] = device_multiplier
+            self.params.kwargs["sigma"] = sigma
+            self.params.kwargs["scene_no"] = scene_no
+            self.params.kwargs["match_fourier"] = match_fourier
+            self.params.kwargs["match_histogram"] = match_histogram
+            self.params.kwargs["match_noise"] = match_noise
+            self.params.kwargs["debug_plot"] = debug_plot
+            self.params.kwargs["noise_var"] = noise_var
+            self.params.kwargs["defocus"] = defocus
+            self.params.kwargs["halo_top_intensity"] = halo_top_intensity
+            self.params.kwargs["halo_bottom_intensity"] = halo_bottom_intensity
+            self.params.kwargs["halo_start"] = halo_start
+            self.params.kwargs["halo_end"] = halo_end 
+            self.params.kwargs["random_real_image"] = random_real_image
+        with open(save_dir+"/opt_params.p", "wb") as f:
+            pickle.dump(self.params.kwargs, f)
         if debug_plot:
-            fig = plt.figure(figsize=(15, 5))
-            ax1 = plt.subplot2grid((1, 8), (0, 0), colspan=1, rowspan=1)
-            ax2 = plt.subplot2grid((1, 8), (0, 1), colspan=1, rowspan=1)
-            ax3 = plt.subplot2grid((1, 8), (0, 2), colspan=3, rowspan=1)
-            ax4 = plt.subplot2grid((1, 8), (0, 5), colspan=3, rowspan=1)
-            ax1.imshow(noisy_img, cmap="Greys_r")
-            ax1.set_title("Synthetic")
-            ax1.axis("off")
-            ax2.imshow(real_resize, cmap="Greys_r")
-            ax2.set_title("Real")
-            ax2.axis("off")
-            ax3.plot(mean_error)
-            ax3.plot(media_error)
-            ax3.plot(cell_error)
-            ax3.plot(device_error)
-            ax3.legend(["Mean error", "Media error", "Cell error", "Device error"])
-            ax3.set_title("Intensity Error")
-            ax3.hlines(0, ax3.get_xlim()[0], ax3.get_xlim()[1], color="k", linestyles="dotted")
-            ax4.plot(mean_var_error)
-            ax4.plot(media_var_error)
-            ax4.plot(cell_var_error)
-            ax4.plot(device_var_error)
-            ax4.legend(["Mean error", "Media error", "Cell error", "Device error"])
-            ax4.set_title("Variance Error")
-            ax4.hlines(0, ax4.get_xlim()[0], ax4.get_xlim()[1], color="k", linestyles="dotted")
-            fig.tight_layout()
-            plt.show()
-            plt.close()
+            if MATLAB_access:
+                print(mean_error)
+                print(media_error)
+                print(cell_error)
+                print(device_error)
+                return noisy_img, real_resize, mean_error, media_error, cell_error, device_error, mean_var_error, media_var_error, cell_var_error, device_var_error
+            else:
+                fig = plt.figure(figsize=(15, 5))
+                ax1 = plt.subplot2grid((1, 8), (0, 0), colspan=1, rowspan=1)
+                ax2 = plt.subplot2grid((1, 8), (0, 1), colspan=1, rowspan=1)
+                ax3 = plt.subplot2grid((1, 8), (0, 2), colspan=3, rowspan=1)
+                ax4 = plt.subplot2grid((1, 8), (0, 5), colspan=3, rowspan=1)
+                ax1.imshow(noisy_img, cmap="Greys_r")
+                ax1.set_title("Synthetic")
+                ax1.axis("off")
+                ax2.imshow(real_resize, cmap="Greys_r")
+                ax2.set_title("Real")
+                ax2.axis("off")
+                ax3.plot(mean_error)
+                ax3.plot(media_error)
+                ax3.plot(cell_error)
+                ax3.plot(device_error)
+                ax3.legend(["Mean error", "Media error", "Cell error", "Device error"])
+                ax3.set_title("Intensity Error")
+                ax3.hlines(0, ax3.get_xlim()[0], ax3.get_xlim()[1], color="k", linestyles="dotted")
+                ax4.plot(mean_var_error)
+                ax4.plot(media_var_error)
+                ax4.plot(cell_var_error)
+                ax4.plot(device_var_error)
+                ax4.legend(["Mean error", "Media error", "Cell error", "Device error"])
+                ax4.set_title("Variance Error")
+                ax4.hlines(0, ax4.get_xlim()[0], ax4.get_xlim()[1], color="k", linestyles="dotted")
+                fig.tight_layout()
+                plt.show()
+                plt.close()
         else:
             return noisy_img, expanded_mask_resized_reshaped.astype(int)
 
@@ -600,7 +710,31 @@ class Renderer:
                                                                                    defocus)
         return expanded_scene, expanded_scene_no_cells, expanded_mask
 
-    def optimise_synth_image(self, manual_update):
+    def update_synth_image_params(self, save_dir):
+
+        self.real_media_mean = self.real_resize[np.where(self.media_label.data)].mean()
+        self.real_cell_mean = self.real_resize[np.where(self.cell_label.data)].mean()
+        self.real_device_mean = self.real_resize[np.where(self.device_label.data)].mean()
+        self.real_means = np.array((self.real_media_mean, self.real_cell_mean, self.real_device_mean))
+
+        self.real_media_var = self.real_resize[np.where(self.media_label.data)].var()
+        self.real_cell_var = self.real_resize[np.where(self.cell_label.data)].var()
+        self.real_device_var = self.real_resize[np.where(self.device_label.data)].var()
+        self.real_vars = np.array((self.real_media_var, self.real_cell_var, self.real_device_var))
+
+        self.image_params = (
+        self.real_media_mean, self.real_cell_mean, self.real_device_mean, self.real_means, self.real_media_var,
+        self.real_cell_var, self.real_device_var, self.real_vars)
+        import pickle
+        with (open(save_dir + "/opt_params.p", "rb")) as openfile:
+            try:
+                params = pickle.load(openfile)
+            except EOFError:
+                raise EOFError
+        print(params)
+        self.params.kwargs = params
+
+    def optimise_synth_image(self, manual_update, save_dir):
 
         """
 
@@ -640,13 +774,14 @@ class Renderer:
             halo_bottom_intensity = (0,1,0.1),
             halo_start = (0,1,0.11),
             halo_end = (0,1,0.1),
-            random_real_image=fixed(None)
+            random_real_image=fixed(None),
+            save_dir=save_dir
         )
 
         return self.params
 
     def generate_training_data(self, sample_amount, randomise_hist_match, randomise_noise_match,
-                               burn_in, n_samples, save_dir, in_series=False, seed=False, n_jobs = 1, dtype = np.uint8):
+                               burn_in, n_samples, save_dir, params_dir, in_series=False, seed=False, n_jobs = 1, dtype = np.uint8):
         """
         Generates the training data from a Jupyter interactive output of generate_test_comparison
 
@@ -731,7 +866,8 @@ class Renderer:
             
             if self.additional_real_images:
                 random_real_image = random.choice(self.additional_real_images)
-            
+            else:
+                random_real_image = self.real_image
             syn_image, mask = self.generate_test_comparison(
                 media_multiplier=media_multiplier,
                 cell_multiplier=cell_multiplier,
@@ -748,7 +884,8 @@ class Renderer:
                 halo_bottom_intensity = self.params.kwargs["halo_bottom_intensity"],
                 halo_start = self.params.kwargs["halo_start"],
                 halo_end = self.params.kwargs["halo_end"],
-                random_real_image = random_real_image
+                random_real_image = random_real_image,
+                save_dir=params_dir
             )
 
             syn_image = Image.fromarray(skimage.img_as_uint(rescale_intensity(syn_image)))

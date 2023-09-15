@@ -274,3 +274,170 @@ class Cell:
         return cell_geometry.centroid(vertices)
 
     
+class StaticCell:
+    def __init__(
+        self,
+        length,
+        width,
+        resolution,
+        lysis_p,
+        position,
+        angle,
+        space,
+        dt
+    ):
+        
+        """
+        Initialising a cell
+
+        For info about the Pymunk objects, see the API reference. http://www.pymunk.org/en/latest/pymunk.html Cell class has been tested and works with pymunk version 6.0.0
+
+        Parameters
+        ----------
+        length : float
+            Cell's length
+        width : float
+            Cell's width
+        resolution : int
+            Number of points defining cell's geometry
+        position : (float, float)
+            x,y coords of cell centroid
+        angle : float
+            rotation in radians of cell (counterclockwise)
+        space : pymunk.space.Space
+            The pymunk space of the cell
+        dt : float
+            Timestep the cell experiences every iteration
+        growth_rate_constant : float
+            The cell grows by a function of dt*growth_rate_constant depending on its growth model
+        max_length : float
+            The maximum length a cell reaches before dividing
+        max_length_mean : float
+            should be the same as max_length for reasons unless doing advanced simulations
+        max_length_var : float
+            The variance defining a normal distribution around max_length
+        width_var : float
+            The variance defining a normal distribution around width
+        width_mean : float
+            For reasons should be set equal to width unless using advanced features
+        body : pymunk.body.Body
+            The cell's pymunk body object
+        shape : pymunk.shapes.Poly
+            The cell's pymunk body object
+        ID : int
+            A unique identifier for each cell. At the moment just a number from 0 to 100_000_000 and cross fingers that we get no collisions. 
+            
+        """
+        self.dt = dt
+        self.length = length
+        self.width = width
+        self.resolution = resolution
+        self.lysis_p = lysis_p
+        self.angle = angle
+        self.position = position
+        self.space = space
+        self.body, self.shape = self.create_pm_cell()
+        self.angle = self.body.angle
+        self.ID = np.random.randint(0,100_000_000)
+        self.pinching_sep = 0
+
+    def is_dividing(self):
+        return False
+
+    def create_pm_cell(self):
+        """
+        Creates a pymunk (pm) cell object, and places it into the pymunk space given when initialising the cell. If the
+        cell is dividing, then two cells will be created. Typically this function is called for every cell, in every
+        timestep to update the entire simulation.
+
+        .. note::
+           The return type of this function is dependent on the value returned by :meth:`SyMBac.cell.Cell.is_dividing()`.
+           This is not good, and will be changed in a future version.
+
+        Returns
+        -------
+        dict or (pymunk.body, pymunk.shape)
+
+           If :meth:`SyMBac.cell.Cell.is_dividing()` returns `True`, then a dictionary of values for the daughter cell
+           is returned. A daughter can then be created. E.g:
+
+           >>> daughter_details = cell.create_pm_cell()
+           >>> daughter = Cell(**daughter_details)
+
+           If :meth:`SyMBac.cell.Cell.is_dividing()` returns `False`, then only a tuple containing (pymunk.body, pymunk.shape) will be returned.
+        """
+
+    
+        cell_vertices = self.calculate_vertex_list()
+        cell_shape = pymunk.Poly(None, cell_vertices)
+        self.shape = cell_shape
+        cell_moment = 10000001
+        cell_mass = 1
+        cell_body = pymunk.Body(cell_mass,cell_moment)
+        cell_shape.body = cell_body
+        cell_shape.elasticity = 0.
+        self.body = cell_body
+        cell_body.position = self.position
+        cell_body.angle = self.angle
+        cell_shape.friction=0
+        self.space.add(cell_body, cell_shape)
+        return cell_body, cell_shape
+
+    def update_position(self):
+        """
+        A method, typically called every timepoint to keep synchronised the cell position (``self.position`` and ``self.angle``)
+        with the position of the cell's corresponding body in the pymunk space (``self.body.position`` and ``self.body.angle``).
+
+        Returns
+        -------
+        None
+        """
+        self.position = self.body.position
+        self.angle = self.body.angle
+
+    def get_angle(self):
+        """
+        Gets the angle of the cell's pymunk body.
+
+        Returns
+        -------
+        angle : float
+           The cell's angle in radians.
+        """
+        return self.body.angle
+    
+    def calculate_vertex_list(self):
+        return cell_geometry.get_vertices(
+            self.length,
+            self.width,
+            self.angle, 
+            self.resolution
+            )
+
+    def get_vertex_list(self):
+        """
+        Calculates the vertex list (a set of x,y coordinates) which parameterise the outline of the cell
+
+        Returns
+        -------
+        vertices : list(tuple(float, float))
+           A list of vertices, each in a tuple, where the order is `(x, y)`. The coordinates are relative to the pymunk
+           space in which the cell exists.
+        """
+        vertices = []
+        for v in self.shape.get_vertices():
+            x,y = v.rotated(self.shape.body.angle) + self.shape.body.position #.rotated(self.shape.body.angle)
+            vertices.append((x,y))
+        return vertices
+
+    def get_centroid(self):
+        """
+        Calculates the centroid of the cell from the vertices.
+
+        Returns
+        -------
+        centroid : float
+            The cell's centroid in coordinates relative to the pymunk space which the cell exists in.
+        """
+        vertices = self.get_vertex_list()
+        return cell_geometry.centroid(vertices)

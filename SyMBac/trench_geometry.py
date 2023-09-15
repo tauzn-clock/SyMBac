@@ -4,6 +4,7 @@ import numpy as np
 def segment_creator(local_xy1, local_xy2,global_xy,thickness):
     segment_body = pymunk.Body(body_type=pymunk.Body.STATIC)
     segment_shape = pymunk.Segment(segment_body, local_xy1,local_xy2,thickness)
+    segment_shape.elasticity = 0.
     segment_body.position = global_xy
     segment_shape.friction = 0
     return segment_body, segment_shape

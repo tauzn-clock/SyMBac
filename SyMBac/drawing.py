@@ -214,7 +214,7 @@ def convert_to_3D(cell):
     cells_3D[cells_3D.shape[0]//2:,:, :] = cells_3D[:cells_3D.shape[0]//2,:, :][::-1]
     return cells_3D
 
-def draw_scene(cell_properties, do_transformation, space_size, offset, label_masks, pinching=True):
+def draw_scene(cell_properties, do_transformation, space_size, offset, label_masks, dynamics_free=False, pinching=True):
     """
     Draws a raw scene (no trench) of cells, and returns accompanying masks for training data.
 
@@ -275,15 +275,22 @@ def draw_scene(cell_properties, do_transformation, space_size, offset, label_mas
             OPL_cell = (OPL_cell_2)
 
         rotated_OPL_cell = rotate(OPL_cell, -angle, resize=True, clip=False, preserve_range=True, center=(x, y))
+        #rotated_OPL_cell = rotate(OPL_cell, 0, resize=True, clip=False, preserve_range=True, center=(x, y))
+
         cell_y, cell_x = (np.array(rotated_OPL_cell.shape) / 2).astype(int)
+
+        if not dynamics_free:
+            assert y > cell_y, "Cell has {} negative pixels in y coordinate, try increasing your offset".format(y - cell_y)
+            assert x > cell_x, "Cell has negative pixels in x coordinate, try increasing your offset"
+        
+        if dynamics_free:
+            if y < cell_y or x < cell_x:
+                print(y, cell_y, x, cell_x, angle)
+                print("Cell has negative pixels")
+                continue
+
         offset_y = rotated_OPL_cell.shape[0] - space[y - cell_y:y + cell_y, x - cell_x:x + cell_x].shape[0]
         offset_x = rotated_OPL_cell.shape[1] - space[y - cell_y:y + cell_y, x - cell_x:x + cell_x].shape[1]
-        assert y > cell_y, "Cell has {} negative pixels in y coordinate, try increasing your offset".format(y - cell_y)
-        assert x > cell_x, "Cell has negative pixels in x coordinate, try increasing your offset"
-        space[
-        y - cell_y:y + cell_y + offset_y,
-        x - cell_x:x + cell_x + offset_x
-        ] += rotated_OPL_cell
 
         def get_mask(label_masks):
 
@@ -302,6 +309,10 @@ def draw_scene(cell_properties, do_transformation, space_size, offset, label_mas
         label_mask = get_mask(True).astype(int)
         nolabel_mask = get_mask(False).astype(int)
         label_mask_fixed = np.where(nolabel_mask > 1, 0, label_mask)
+        nolabel_mask_fixed = np.where(nolabel_mask > 1, 0, nolabel_mask)
+        
+        if (np.sum(nolabel_mask) - np.sum(nolabel_mask_fixed) > 0.2*length*width):
+            continue
         if label_masks:
             space_masks = label_mask_fixed
         else:
@@ -309,6 +320,10 @@ def draw_scene(cell_properties, do_transformation, space_size, offset, label_mas
             space_masks = np.where(mask_borders, 0, label_mask_fixed)
             space_masks = opening(space_masks)
             space_masks = space_masks.astype(bool)
+        space[
+        y - cell_y:y + cell_y + offset_y,
+        x - cell_x:x + cell_x + offset_x
+        ] += rotated_OPL_cell
         space = space * space_masks.astype(bool)
     return space, space_masks
 
